@@ -399,7 +399,6 @@ int main(int argc, char* argv[])
 
 	for( Vertex& vertexLow : meshLow.getVertices())
 	{
-		vertexDescriptorsLow.normalsOrig[vertexLow.ID] = vertexLow.n;
 		vertexDescriptorsLow.rotors[vertexLow.ID] = Eigen::Quaterniond::Identity();
 		normalizedPoint position = c3gaPoint(vertexLow.p.x(), vertexLow.p.y(), vertexLow.p.z());
 
@@ -687,8 +686,6 @@ void UpdateLaplaciansRotationExec(Mesh *mesh, std::shared_ptr<SparseMatrix> A, V
 			Rq[vertexDegree] = vertexDescriptors.rotors[j];
 		}
 		double invVertexDegree = alpha * g_meshArea / (double)vertexDegree;
-		//rotor M = E3GA4(P, Q, vertexDescriptors[i]->M, vertexDegree);
-		//rotor M = E3GA5(P, Q, vertexDegree);
 		Eigen::Quaterniond M = E3GA_Fast5(invVertexDegree, Rq, vertexDescriptors.rotors[i], vertexDegree, vertexDescriptors.JtJ[i], vertexDescriptors.b[i]);
 		vertexDescriptors.rotors[i] = M.normalized();
 	}
@@ -843,14 +840,6 @@ void display()
 			}
 			transferRotations(&mesh, AHi, vertexDescriptors, vertexDescriptorsLow);
 			SolveLinearSystemTaucsHi(vertexDescriptors, vertexDescriptorsLow);
-			//UpdateLaplaciansRotationPrep(&mesh, AHi, vertexDescriptors);
-			//UpdateLaplaciansRotationExec(&mesh, AHi, vertexDescriptors, false);
-			//UpdateLaplaciansRotationExec(&mesh, AHi, vertexDescriptors, false);
-			//UpdateLaplaciansRotationExec(&mesh, AHi, vertexDescriptors, false);
-			//UpdateLaplaciansRotationExec(&mesh, AHi, vertexDescriptors, false);
-			//UpdateLaplaciansRotationExec(&mesh, AHi, vertexDescriptors, false);
-			//UpdateLaplaciansRotationExec(&mesh, AHi, vertexDescriptors, true);
-			//SolveLinearSystemTaucsHi(vertexDescriptors, vertexDescriptorsLow);
 		}
 	}
 	if(g_iterateManyTimes)
@@ -897,14 +886,6 @@ void display()
 
 			transferRotations(&mesh, AHi, vertexDescriptors, vertexDescriptorsLow);
 			SolveLinearSystemTaucsHi(vertexDescriptors, vertexDescriptorsLow);
-			//UpdateLaplaciansRotationPrep(&mesh, AHi, vertexDescriptors);
-			//UpdateLaplaciansRotationExec(&mesh, AHi, vertexDescriptors, false);
-			//UpdateLaplaciansRotationExec(&mesh, AHi, vertexDescriptors, false);
-			//UpdateLaplaciansRotationExec(&mesh, AHi, vertexDescriptors, false);
-			//UpdateLaplaciansRotationExec(&mesh, AHi, vertexDescriptors, false);
-			//UpdateLaplaciansRotationExec(&mesh, AHi, vertexDescriptors, false);
-			//UpdateLaplaciansRotationExec(&mesh, AHi, vertexDescriptors, true);
-			//SolveLinearSystemTaucsHi(vertexDescriptors, vertexDescriptorsLow);
 		}
 		else
 		{
@@ -921,14 +902,6 @@ void display()
 			}
 			transferRotations(&mesh, AHi, vertexDescriptors, vertexDescriptorsLow);
 			SolveLinearSystemTaucsHi(vertexDescriptors, vertexDescriptorsLow);
-			//UpdateLaplaciansRotationPrep(&mesh, AHi, vertexDescriptors);
-			//UpdateLaplaciansRotationExec(&mesh, AHi, vertexDescriptors, false);
-			//UpdateLaplaciansRotationExec(&mesh, AHi, vertexDescriptors, false);
-			//UpdateLaplaciansRotationExec(&mesh, AHi, vertexDescriptors, false);
-			//UpdateLaplaciansRotationExec(&mesh, AHi, vertexDescriptors, false);
-			//UpdateLaplaciansRotationExec(&mesh, AHi, vertexDescriptors, false);
-			//UpdateLaplaciansRotationExec(&mesh, AHi, vertexDescriptors, true);
-			//SolveLinearSystemTaucsHi(vertexDescriptors, vertexDescriptorsLow);
 		}
 		g_iterateManyTimes = false;
 	}
