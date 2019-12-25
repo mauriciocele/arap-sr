@@ -88,49 +88,82 @@ public:
 	}
 };
 
-class VertexDescriptor
+class VertexBuffer
 {
 public:
-	vectorE3GA deformedPosition; //deformed mesh position
-	normalizedPoint position; //primary backup
-	normalizedPoint positionConstrained; //primary backup
-	vectorE3GA laplacianCoordinate; //laplacian Coordinate
-	vectorE3GA normal; //for rendering (lighting)
-	vectorE3GA normalOrig; //primary backup
-	rotor M;
-	//rotor R;
-	Eigen::Matrix4d JtJ;
-	Eigen::Vector4d b;
-	bool isBoundary;
+	std::vector<Eigen::Vector3d> deformedPositions; //deformed mesh positions
+	std::map<int, Eigen::Vector3d> constrainedPositions; //positional constraints
+	std::vector<Eigen::Vector3d> laplacianCoordinates; //laplacian Coordinates
+	std::vector<Eigen::Vector3d> normals; //for rendering (lighting)
+	std::vector<Eigen::Vector3d> normalsOrig; //original normals
+	std::vector<Eigen::Quaterniond> rotors;
+	std::vector<Eigen::Matrix4d> JtJ;
+	std::vector<Eigen::Vector4d> b;
+	int size;
 
-	VertexDescriptor()
+	VertexBuffer() : size(0)
 	{
 	}
+
+	void resize(int size)
+	{
+		this->size = size;
+		deformedPositions.resize(size);
+		laplacianCoordinates.resize(size);
+		normals.resize(size);
+		normalsOrig.resize(size);
+		rotors.resize(size);
+		JtJ.resize(size);
+		b.resize(size);
+	}
+	int get_size() { return size; }
+
+};
+
+class IndexBuffer {
+public:
+	std::vector<int> faces;
+	int size;
+
+	IndexBuffer() : size(0)
+	{
+	}
+
+	void resize(int size)
+	{
+		this->size = size;
+		faces.resize(size);
+	}
+	int get_size() { return size; }
+
 };
 
 class Handle
 {
 public:
-	TRversor R;
-	TRversor T;
+	rotor R;
+	translator T;
+	translator Tcenter;
 	dualSphere dS;
-	bool fixed;
-	dualPlane Plane;
-	//int extrema;
+	std::set<int> constraints;
 
-	Handle(dualSphere dS, bool fixed, dualPlane dP)
+	Handle() {
+		T = _rotor(1.0);
+		R = _translator(1.0);
+		Tcenter = _translator(1.0);
+	}
+	Handle(dualSphere dS)
 	{
 		normalizedPoint x = DualSphereCenter(dS);
-		T = _TRversor( exp(-0.5 * _vectorE3GA(x)^ni) );
-		R = _TRversor(1.0);
-		Plane = dP;
-		this->dS = inverse(T) * dS * T;
-		this->fixed = fixed;
+		Tcenter = exp(-0.5 * _vectorE3GA(x) * ni);
+		T = _translator(1.0);
+		R = _rotor(1.0);
+		this->dS = dS;
 	}
 
 	TRversor GetTRVersor()
 	{
-		return T * R;
+		return _TRversor(T * _TRversor(Tcenter * R * inverse(Tcenter)));
 	}
 };
 
@@ -148,8 +181,6 @@ float g_dragDistance = -1.0f;
 int g_dragObject;
 std::shared_ptr<SparseMatrix> A;
 std::shared_ptr<SparseMatrix> AHi;
-std::set<int> constraints;
-std::set<int> fconstraints;
 Eigen::SparseLU<Eigen::SparseMatrix<double>, Eigen::COLAMDOrdering<int>> solverLow, solverHi;
 int systemType = LaplaceBeltrami; //MeanValue; //LaplaceBeltrami
 bool g_showSpheres = true;
@@ -165,26 +196,54 @@ bool g_automaticAnimation = false;
 bool g_convergence = false;
 Benchmarks benchs;
 
-vector<std::shared_ptr<VertexDescriptor>> vertexDescriptors;
-vector<std::shared_ptr<VertexDescriptor>> vertexDescriptorsLow;
-std::vector<std::shared_ptr<Handle>> handles;
-//std::vector<boost::shared_ptr<Extrema>> extremas;
+VertexBuffer vertexDescriptors;
+VertexBuffer vertexDescriptorsLow;
+IndexBuffer trianglesHi;
+std::vector<Handle> handles;
 
+Eigen::Affine3d MotorToMatrix(const TRversor& R) {
+	TRversor Ri = inverse(R);
 
-void ComputeLaplacianCoordinates(std::shared_ptr<SparseMatrix> A, vector<std::shared_ptr<VertexDescriptor>>& vertexDescriptors)
+	// compute images of basis vectors:
+	c3ga::flatPoint imageOfE1NI = _flatPoint(R * c3ga::e1ni * Ri);
+	c3ga::flatPoint imageOfE2NI = _flatPoint(R * c3ga::e2ni * Ri);
+	c3ga::flatPoint imageOfE3NI = _flatPoint(R * c3ga::e3ni * Ri);
+	c3ga::flatPoint imageOfNONI = _flatPoint(R * c3ga::noni * Ri);
+
+	// create matrix representation:
+	Eigen::Affine3d M;
+	M(0, 0) = imageOfE1NI.m_c[0];
+	M(1, 0) = imageOfE1NI.m_c[1];
+	M(2, 0) = imageOfE1NI.m_c[2];
+	M(3, 0) = imageOfE1NI.m_c[3];
+	M(0, 1) = imageOfE2NI.m_c[0];
+	M(1, 1) = imageOfE2NI.m_c[1];
+	M(2, 1) = imageOfE2NI.m_c[2];
+	M(3, 1) = imageOfE2NI.m_c[3];
+	M(0, 2) = imageOfE3NI.m_c[0];
+	M(1, 2) = imageOfE3NI.m_c[1];
+	M(2, 2) = imageOfE3NI.m_c[2];
+	M(3, 2) = imageOfE3NI.m_c[3];
+	M(0, 3) = imageOfNONI.m_c[0];
+	M(1, 3) = imageOfNONI.m_c[1];
+	M(2, 3) = imageOfNONI.m_c[2];
+	M(3, 3) = imageOfNONI.m_c[3];
+	return M;
+}
+
+void ComputeLaplacianCoordinates(std::shared_ptr<SparseMatrix> A, Mesh* mesh, std::vector<Eigen::Vector3d>& laplacianCoordinates)
 {
-	for( int i = 0 ; i < vertexDescriptors.size() ; ++i )
-		vertexDescriptors[i]->laplacianCoordinate = _vectorE3GA(0.0, 0.0, 0.0);
-	
+	std::fill(laplacianCoordinates.begin(), laplacianCoordinates.end(), Eigen::Vector3d(0, 0, 0));
+
 	auto numRows = A->numRows();
 
-	for( int i = 0; i < numRows ; ++i)
+	for (int i = 0; i < numRows; ++i)
 	{
 		SparseMatrix::RowIterator aIter = A->iterator(i);
-		for( ; !aIter.end() ; ++aIter )
+		for (; !aIter.end(); ++aIter)
 		{
 			auto j = aIter.columnIndex();
-			vertexDescriptors[i]->laplacianCoordinate += _vectorE3GA(vertexDescriptors[j]->position) * aIter.value();
+			laplacianCoordinates[i] += mesh->vertexAt(j).p * aIter.value();
 		}
 	}
 }
@@ -314,12 +373,9 @@ int main(int argc, char* argv[])
 
 	InitializeDrawing();
 
-	dualPlane P1 = _dualPlane(c3gaPoint(.0, 0.8,.0) << (_vectorE3GA(0,1,0)*ni));
-	dualPlane P2 = _dualPlane(c3gaPoint(.0,-0.8,.0) << (_vectorE3GA(0,-1,0)*ni));
-
 	//cactus.obj
-	handles.push_back(std::shared_ptr<Handle>(new Handle(_dualSphere(c3gaPoint(.0, .04, 0.7) - 0.5*SQR(0.15)*ni), false, P1)));
-	handles.push_back(std::shared_ptr<Handle>(new Handle(_dualSphere(c3gaPoint(.0, .04, -0.8) - 0.5*SQR(0.15)*ni), true, P2)));
+	handles.push_back(Handle(_dualSphere(c3gaPoint(.0, .04, 0.7) - 0.5*SQR(0.15)*ni)));
+	handles.push_back(Handle(_dualSphere(c3gaPoint(.0, .04, -0.8) - 0.5*SQR(0.15)*ni)));
 
 	////cylinder.obj
 	//handles.push_back(std::shared_ptr<Handle>(new Handle(_dualSphere(c3gaPoint(.0, 0.9, .0) - 0.5*SQR(0.25)*ni), false, P1)));
@@ -337,75 +393,60 @@ int main(int argc, char* argv[])
 	//extremas[0]->handle = 0;
 	//extremas[1]->handle = 1;
 
+	vertexDescriptorsLow.resize(meshLow.numVertices());
+	vertexDescriptors.resize(mesh.numVertices());
+	trianglesHi.resize(mesh.numFaces() * 3);
+
 	for( Vertex& vertexLow : meshLow.getVertices())
 	{
-		std::shared_ptr<VertexDescriptor> vd(new VertexDescriptor);
+		vertexDescriptorsLow.normalsOrig[vertexLow.ID] = vertexLow.n;
+		vertexDescriptorsLow.rotors[vertexLow.ID] = Eigen::Quaterniond::Identity();
+		normalizedPoint position = c3gaPoint(vertexLow.p.x(), vertexLow.p.y(), vertexLow.p.z());
 
-		vd->position = c3gaPoint(vertexLow.p.x(), vertexLow.p.y(), vertexLow.p.z() );
-		vd->normalOrig = _vectorE3GA(vertexLow.n.x(), vertexLow.n.y(), vertexLow.n.z() );
-		vd->isBoundary = vertexLow.isBoundary();
-		//vd->R.Identity();
-		vd->M = _rotor(1.0);
-
-		vertexDescriptorsLow.push_back(vd);
-
-		for( int i = 0 ; i < handles.size() ;  ++i )
+		for (Handle& handle : handles)
 		{
-			TRversor TR = handles[i]->GetTRVersor();
+			TRversor TR = handle.GetTRVersor();
 
-			if( _double(vd->position << (TR * handles[i]->dS * inverse(TR))) > 0 ) //inside the sphere
-			//if( _double(vd->position << handles[i]->Plane) > 0 ) //positive side of the plane
+			if (_double(position << (TR * handle.dS * inverse(TR))) > 0) //inside the sphere
 			{
-				if( !handles[i]->fixed )
-				{
-					constraints.insert(vertexLow.ID);
-				}
-				else
-				{
-					fconstraints.insert(vertexLow.ID);
-				}
+				handle.constraints.insert(vertexLow.ID);
+				vertexDescriptorsLow.constrainedPositions[vertexLow.ID] = vertexLow.p;
 			}
-		}
-		if(vd->isBoundary)
-		{
-			fconstraints.insert(vertexLow.ID);
 		}
 	}
 
 	A = CreateLaplacianMatrix( &meshLow, systemType );
 	
-	ComputeLaplacianCoordinates(A, vertexDescriptorsLow);
-
-	TRversor R1 = handles[0]->GetTRVersor();
-	for(std::set<int>::iterator citer = constraints.begin(); citer != constraints.end() ; citer++)
-		vertexDescriptorsLow[*citer]->positionConstrained = normalize(_point(inverse(R1) * vertexDescriptorsLow[*citer]->position * R1));
-
-	TRversor R2 = handles[1]->GetTRVersor();
-	for(std::set<int>::iterator citer = fconstraints.begin(); citer != fconstraints.end() ; citer++)
-		vertexDescriptorsLow[*citer]->positionConstrained = normalize(_point(inverse(R2) * vertexDescriptorsLow[*citer]->position * R2));
+	ComputeLaplacianCoordinates(A, &meshLow, vertexDescriptorsLow.laplacianCoordinates);
 
 	b3Low = Eigen::MatrixXd(A->numRows(), 3);
 
-	std::set<int> allconstraints = constraints;
-	allconstraints.insert(fconstraints.begin(), fconstraints.end());
+	std::set<int> allconstraints;
+	for (Handle& handle : handles) {
+		allconstraints.insert(handle.constraints.begin(), handle.constraints.end());
+	}
 	PreFactor(A, allconstraints, solverLow);
 
 	g_meshArea = meshArea(&meshLow);
 
-	for (Vertex& vertexHi : mesh.getVertices())
-	{
-		std::shared_ptr<VertexDescriptor> vd(new VertexDescriptor);
-
-		vd->position = c3gaPoint(vertexHi.p.x(), vertexHi.p.y(), vertexHi.p.z());
-		vd->normalOrig = _vectorE3GA(vertexHi.n.x(), vertexHi.n.y(), vertexHi.n.z());
-		vd->isBoundary = vertexHi.isBoundary();
-		//vd->R.Identity();
-		vd->M = _rotor(1.0);
-		vertexDescriptors.push_back(vd);
+	for (Vertex& vertexHi : mesh.getVertices()) {
+		vertexDescriptors.normalsOrig[vertexHi.ID] = vertexHi.n;
+		vertexDescriptors.rotors[vertexHi.ID] = Eigen::Quaterniond::Identity();
 	}
 
+	for (Face& face : mesh.getFaces()) {
+		int i = face.ID;
+		int	v1 = face.edge->vertex->ID;
+		int	v2 = face.edge->next->vertex->ID;
+		int	v3 = face.edge->next->next->vertex->ID;
+		trianglesHi.faces[i * 3 + 0] = v1;
+		trianglesHi.faces[i * 3 + 1] = v2;
+		trianglesHi.faces[i * 3 + 2] = v3;
+	}
+
+
 	AHi = CreateLaplacianMatrix(&mesh, systemType);
-	ComputeLaplacianCoordinates(AHi, vertexDescriptors);
+	ComputeLaplacianCoordinates(AHi, &mesh, vertexDescriptors.laplacianCoordinates);
 	std::set<int> constraintsHi;
 	for (map<int, int>::iterator iter = mapping.begin(); iter != mapping.end(); iter++){
 		constraintsHi.insert(iter->second);
@@ -418,103 +459,74 @@ int main(int argc, char* argv[])
 	return 0;
 }
 
-void transferRotations(Mesh *mesh, std::shared_ptr<SparseMatrix> A, vector<std::shared_ptr<VertexDescriptor>>& vertexDescriptors, vector<std::shared_ptr<VertexDescriptor>>& vertexDescriptorsLow)
+void transferRotations(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuffer& vertexDescriptors, VertexBuffer& vertexDescriptorsLow)
 {
 	for (auto&& pair : rotorClusters) {
-		vertexDescriptors[pair.first]->M = vertexDescriptorsLow[pair.second]->M;
+		vertexDescriptors.rotors[pair.first] = vertexDescriptorsLow.rotors[pair.second];
 	}
 
-	concurrency::parallel_for_each(mesh->getVertices().begin(), mesh->getVertices().end(), [&](Vertex& vertex)
-	//for (auto vertex : mesh->vertices)
+	std::fill(vertexDescriptors.laplacianCoordinates.begin(), vertexDescriptors.laplacianCoordinates.end(), Eigen::Vector3d(0, 0, 0));
+
+	//concurrency::parallel_for_each(mesh->getVertices().begin(), mesh->getVertices().end(), [&](Vertex& vertex)
+	for (Vertex& vertex : mesh->getVertices())
 	{
 		int i = vertex.ID;
-		vertexDescriptors[i]->laplacianCoordinate = _vectorE3GA(0.0, 0.0, 0.0);
 		for (Vertex::EdgeAroundIterator edgeAroundIter = vertex.iterator(); !edgeAroundIter.end(); edgeAroundIter++)
 		{
 			int j = edgeAroundIter.edge_out()->pair->vertex->ID;
 			double wij = (*A)(i, j);
-			rotor &Ri = vertexDescriptors[i]->M;
-			rotor &Rj = vertexDescriptors[j]->M;
-			vectorE3GA V = _vectorE3GA(vertexDescriptors[j]->position) - _vectorE3GA(vertexDescriptors[i]->position);
-			vectorE3GA Vp = _vectorE3GA(0.5 * wij * (Ri * V * (~Ri) + Rj * V * (~Rj)));
-			vertexDescriptors[i]->laplacianCoordinate += Vp;
+			Eigen::Quaterniond &Ri = vertexDescriptors.rotors[i];
+			Eigen::Quaterniond &Rj = vertexDescriptors.rotors[j];
+			Eigen::Vector3d V = mesh->vertexAt(j).p - mesh->vertexAt(i).p;
+			vertexDescriptors.laplacianCoordinates[i] += 0.5 * wij * (Ri._transformVector(V) + Rj._transformVector(V));;
 		}
-	//}
-	});
+	}
+	//});
 }
 
-void SolveLinearSystemTaucs(vector<std::shared_ptr<VertexDescriptor>>& vertexDescriptors)
+void SolveLinearSystemTaucs(VertexBuffer& vertexDescriptors)
 {
-	int n = vertexDescriptors.size();
+	int n = vertexDescriptors.get_size();
 
-	for( int i = 0 ; i < n ; ++i )
-	{
-		auto &laplacianCoordinate = vertexDescriptors[i]->laplacianCoordinate;
-		b3Low(i,0) = laplacianCoordinate.e1();
-		b3Low(i,1) = laplacianCoordinate.e2();
-		b3Low(i,2) = laplacianCoordinate.e3();
+	for (int i = 0; i < n; ++i) {
+		b3Low.row(i) = vertexDescriptors.laplacianCoordinates[i];
 	}
 
-	TRversor R2 = handles[1]->GetTRVersor();
-	TRversor R2inv = inverse(R2);
-	for(std::set<int>::iterator citer = fconstraints.begin(); citer != fconstraints.end() ; citer++)
-	{
-		int i = *citer;
-		auto constraint = normalize(_point(R2 * vertexDescriptors[i]->positionConstrained * R2inv));
-		b3Low(i, 0) = constraint.e1();
-		b3Low(i, 1) = constraint.e2();
-		b3Low(i, 2) = constraint.e3();
-	}
-	TRversor R1 = handles[0]->GetTRVersor();
-	TRversor R1inv = inverse(R1);
-	for(std::set<int>::iterator citer = constraints.begin(); citer != constraints.end() ; citer++)
-	{
-		int i = *citer;
-		auto constraint = normalize(_point(R1 * vertexDescriptors[i]->positionConstrained * R1inv));
-		b3Low(i, 0) = constraint.e1();
-		b3Low(i, 1) = constraint.e2();
-		b3Low(i, 2) = constraint.e3();
+	for (Handle& handle : handles) {
+		Eigen::Affine3d M = MotorToMatrix(handle.GetTRVersor());
+		for (int i : handle.constraints) {
+			b3Low.row(i) = M * vertexDescriptors.constrainedPositions[i];
+		}
 	}
 
 	xyzLow = solverLow.solve(b3Low);
 
-	for( int i = 0 ; i < n ; ++i )
-	{
-		vertexDescriptors[i]->deformedPosition = _vectorE3GA(xyzLow(i,0), xyzLow(i, 1), xyzLow(i, 2));
-		vertexDescriptors[i]->normal = vertexDescriptors[i]->normalOrig;
+	for( int i = 0 ; i < n ; ++i ) {
+		vertexDescriptors.deformedPositions[i] = xyzLow.row(i);
 	}
 }
 
-void SolveLinearSystemTaucsHi(vector<std::shared_ptr<VertexDescriptor>>& vertexDescriptors, vector<std::shared_ptr<VertexDescriptor>>& vertexDescriptorsLow)
+void SolveLinearSystemTaucsHi(VertexBuffer& vertexDescriptors, VertexBuffer& vertexDescriptorsLow)
 {
-	int n = vertexDescriptors.size();
+	int n = vertexDescriptors.get_size();
 
-	for (int i = 0; i < n; ++i)
-	{
-		auto &laplacianCoordinate = vertexDescriptors[i]->laplacianCoordinate;
-		b3Hi(i, 0) = laplacianCoordinate.e1();
-		b3Hi(i, 1) = laplacianCoordinate.e2();
-		b3Hi(i, 2) = laplacianCoordinate.e3();
+	for (int i = 0; i < n; ++i) {
+		b3Hi.row(i) = vertexDescriptors.laplacianCoordinates[i];
 	}
 
-	for (map<int, int>::iterator iter = mapping.begin(); iter != mapping.end(); iter++){
-		int i = iter->second;
-		auto &constraint = vertexDescriptorsLow[iter->first]->deformedPosition;
-		b3Hi(i, 0) = constraint.e1();
-		b3Hi(i, 1) = constraint.e2();
-		b3Hi(i, 2) = constraint.e3();
+	for (auto&& pair : mapping){
+		b3Hi.row(pair.second) = vertexDescriptorsLow.deformedPositions[pair.first];
 	}
 
 	xyzHi = solverHi.solve(b3Hi);
 
-	for (int i = 0; i < n; ++i)
-	{
-		vertexDescriptors[i]->deformedPosition = _vectorE3GA(xyzHi(i, 0), xyzHi(i, 1), xyzHi(i, 2));
-		vertexDescriptors[i]->normal = vertexDescriptors[i]->normalOrig;
+	for (int i = 0; i < n; ++i) {
+		vertexDescriptors.deformedPositions[i] = xyzHi.row(i);
+		vertexDescriptors.normals[i] = vertexDescriptors.rotors[i]._transformVector(vertexDescriptors.normalsOrig[i]);
 	}
 }
 
-void E3GA_Prep(const vector<vectorE3GA>& P, const vector<vectorE3GA>& Q, double wij2, const int N, Eigen::Matrix4d &JtJ, Eigen::Vector4d &b)
+void E3GA_Prep(const vector<Eigen::Vector3d>& P, const vector<Eigen::Vector3d>& Q, double wij2, const int N, Eigen::Matrix4d &JtJ, Eigen::Vector4d &b)
 {
 	JtJ.setZero();
 
@@ -533,15 +545,15 @@ void E3GA_Prep(const vector<vectorE3GA>& P, const vector<vectorE3GA>& Q, double 
 
 	for (int i = 0; i < N; ++i)
 	{
-		const vectorE3GA& Pi = P[i];
-		const vectorE3GA& Qi = Q[i];
+		const Eigen::Vector3d& Pi = P[i];
+		const Eigen::Vector3d& Qi = Q[i];
 
-		q1p1 = Qi.e1() + Pi.e1();
-		q2p2 = Qi.e2() + Pi.e2();
-		q3p3 = Qi.e3() + Pi.e3();
-		p1q1 = Pi.e1() - Qi.e1();
-		p2q2 = Pi.e2() - Qi.e2();
-		p3q3 = Pi.e3() - Qi.e3();
+		q1p1 = Qi.x() + Pi.x();
+		q2p2 = Qi.y() + Pi.y();
+		q3p3 = Qi.z() + Pi.z();
+		p1q1 = Pi.x() - Qi.x();
+		p2q2 = Pi.y() - Qi.y();
+		p3q3 = Pi.z() - Qi.z();
 
 		p1q1_2 = p1q1 * p1q1;
 		p2q2_2 = p2q2 * p2q2;
@@ -584,7 +596,7 @@ void E3GA_Prep(const vector<vectorE3GA>& P, const vector<vectorE3GA>& Q, double 
 	JtJ = JtJ.inverse().eval();
 }
 
-rotor E3GA_Fast5(double wij, const vector<rotor>& Rq, const rotor& Rx, const int N, const Eigen::Matrix4d &JtJ, const Eigen::Vector4d &b)
+Eigen::Quaterniond E3GA_Fast5(double wij, const vector<Eigen::Quaterniond>& Rq, const Eigen::Quaterniond& Rx, const int N, const Eigen::Matrix4d &JtJ, const Eigen::Vector4d &b)
 {
 	Eigen::Vector4d x;
 	Eigen::Vector4d b2;
@@ -593,125 +605,119 @@ rotor E3GA_Fast5(double wij, const vector<rotor>& Rq, const rotor& Rx, const int
 
 	for (int i = 0; i < N; ++i)
 	{
-		const rotor& Rqi = Rq[i];
-		b2(0) += (_double(Rqi) - 1.0); // 1.0
-		b2(1) += Rqi.e1e2(); // e1 ^ e2
-		b2(2) += -Rqi.e3e1(); // e1 ^ e3
-		b2(3) += Rqi.e2e3(); // e2 ^ e3
+		const Eigen::Quaterniond& Rqi = Rq[i];
+		b2(0) += Rqi.w() - 1.0; // 1.0
+		b2(1) += -Rqi.z(); // e1 ^ e2
+		b2(2) += Rqi.y(); // e1 ^ e3
+		b2(3) += -Rqi.x(); // e2 ^ e3
 	}
 
 	b2 *= wij;
 
-	b2(0) += b(0) + 1e-6 * (_double(Rx) - 1.0); // 1.0
-	b2(1) += b(1) + 1e-6 * Rx.e1e2(); // e1 ^ e2
-	b2(2) += b(2) + 1e-6 * -Rx.e3e1(); // e1 ^ e3
-	b2(3) += b(3) + 1e-6 * Rx.e2e3(); // e2 ^ e3
+	b2(0) += b(0) + 1e-6 * (Rx.w() - 1.0); // 1.0
+	b2(1) += b(1) + 1e-6 * -Rx.z(); // e1 ^ e2
+	b2(2) += b(2) + 1e-6 * Rx.y(); // e1 ^ e3
+	b2(3) += b(3) + 1e-6 * -Rx.x(); // e2 ^ e3
 
 	x.noalias() = JtJ * b2;
 
-	return rotor(rotor_scalar_e1e2_e2e3_e3e1, 1.0 + x(0), x(1), x(3), -x(2));
+	return Eigen::Quaterniond(1.0 + x(0), -x(3), x(2), -x(1)); //rotor(rotor_scalar_e1e2_e2e3_e3e1, 1.0 + x(0), x(1), x(3), -x(2));
 }
 
-void UpdateLaplaciansRotationPrep(Mesh *mesh, std::shared_ptr<SparseMatrix> A, vector<std::shared_ptr<VertexDescriptor>>& vertexDescriptors)
+void UpdateLaplaciansRotationPrep(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuffer& vertexDescriptors)
 {
 	//Matrix3x3 m;
 	//Matrix3x3 U, W, V, Ut;
 	//Matrix3x3 M;
 	//ICP icp;
+	vector<Eigen::Vector3d> P;
+	vector<Eigen::Vector3d> Q;
+
+	P.resize(32);
+	Q.resize(32);
 
 	const double alpha = 0.14;
-	concurrency::parallel_for_each(mesh->getVertices().begin(), mesh->getVertices().end(), [&](Vertex& vertex)
-	//for (auto vertex : mesh->vertices)
+	//concurrency::parallel_for_each(mesh->getVertices().begin(), mesh->getVertices().end(), [&](Vertex& vertex)
+	for (Vertex& vertex : mesh->getVertices())
 	{
-		vector<vectorE3GA> P;
-		vector<vectorE3GA> Q;
-
-		P.resize(32);
-		Q.resize(32);
 		int i = vertex.ID;
 
 		Eigen::Vector3d &pi = vertex.p;
-		vectorE3GA &tpi = vertexDescriptors[i]->deformedPosition;
+		Eigen::Vector3d &tpi = vertexDescriptors.deformedPositions[i];
 
 		int vertexDegree = 0;
 		for (Vertex::EdgeAroundIterator edgeAroundIter = vertex.iterator(); vertexDegree < 32 && !edgeAroundIter.end(); edgeAroundIter++, vertexDegree++)
 		{
 			int j = edgeAroundIter.edge_out()->pair->vertex->ID;
 
-			vectorE3GA &tpj = vertexDescriptors[j]->deformedPosition;
+			Eigen::Vector3d &tpj = vertexDescriptors.deformedPositions[j];
 			Eigen::Vector3d &pj = mesh->vertexAt(j).p;
 			Eigen::Vector3d eij = (pj - pi) * (*A)(i, j);
-			vectorE3GA teij = tpj - tpi;
+			Eigen::Vector3d teij = tpj - tpi;
 
-			P[vertexDegree] = _vectorE3GA(eij.x(), eij.y(), eij.z());
+			P[vertexDegree] = eij;
 			Q[vertexDegree] = teij;
 		}
 		double invVertexDegree = alpha * g_meshArea / (double)vertexDegree;
 		//rotor M = E3GA4(P, Q, vertexDescriptors[i]->M, vertexDegree);
 		//rotor M = E3GA5(P, Q, vertexDegree);
-		E3GA_Prep(P, Q, invVertexDegree, vertexDegree, vertexDescriptors[i]->JtJ, vertexDescriptors[i]->b);
-	//}
-	});
+		E3GA_Prep(P, Q, invVertexDegree, vertexDegree, vertexDescriptors.JtJ[i], vertexDescriptors.b[i]);
+	}
+	//});
 }
 
-void UpdateLaplaciansRotationExec(Mesh *mesh, std::shared_ptr<SparseMatrix> A, vector<std::shared_ptr<VertexDescriptor>>& vertexDescriptors, bool updateLaplacian)
+void UpdateLaplaciansRotationExec(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuffer& vertexDescriptors, bool updateLaplacian)
 {
 	const double alpha = 0.14;
-	concurrency::parallel_for_each(mesh->getVertices().begin(), mesh->getVertices().end(), [&](Vertex& vertex)
-	//for (auto vertex : mesh->vertices)
-	{
-		vector<rotor> Rq;
+	vector<Eigen::Quaterniond> Rq;
 
-		Rq.resize(32);
+	Rq.resize(32);
+	//concurrency::parallel_for_each(mesh->getVertices().begin(), mesh->getVertices().end(), [&](Vertex& vertex)
+	for (Vertex& vertex : mesh->getVertices())
+	{
 		int i = vertex.ID;
 
 		Eigen::Vector3d &pi = vertex.p;
-		vectorE3GA &tpi = vertexDescriptors[i]->deformedPosition;
+		Eigen::Vector3d &tpi = vertexDescriptors.deformedPositions[i];
 
 		int vertexDegree = 0;
 		for (Vertex::EdgeAroundIterator edgeAroundIter = vertex.iterator(); vertexDegree < 32 && !edgeAroundIter.end(); edgeAroundIter++, vertexDegree++)
 		{
 			int j = edgeAroundIter.edge_out()->pair->vertex->ID;
-			Rq[vertexDegree] = vertexDescriptors[j]->M;
+			Rq[vertexDegree] = vertexDescriptors.rotors[j];
 		}
 		double invVertexDegree = alpha * g_meshArea / (double)vertexDegree;
 		//rotor M = E3GA4(P, Q, vertexDescriptors[i]->M, vertexDegree);
 		//rotor M = E3GA5(P, Q, vertexDegree);
-		rotor M = E3GA_Fast5(invVertexDegree, Rq, vertexDescriptors[i]->M, vertexDegree, vertexDescriptors[i]->JtJ, vertexDescriptors[i]->b);
-		vertexDescriptors[i]->M = normalize(M);
-	//}
-	});
+		Eigen::Quaterniond M = E3GA_Fast5(invVertexDegree, Rq, vertexDescriptors.rotors[i], vertexDegree, vertexDescriptors.JtJ[i], vertexDescriptors.b[i]);
+		vertexDescriptors.rotors[i] = M.normalized();
+	}
+	//});
 
-	//for (int i = 0; i < vertexDescriptors.size(); ++i)
-	//{
-	//	vertexDescriptors[i]->M = vertexDescriptors[i]->R;
-	//}
-
-	if (!updateLaplacian)
-	{
+	if (!updateLaplacian) {
 		return;
 	}
 
-	concurrency::parallel_for_each(mesh->getVertices().begin(), mesh->getVertices().end(), [&](Vertex& vertex)
-	//for (auto vertex : mesh->vertices)
+	std::fill(vertexDescriptors.laplacianCoordinates.begin(), vertexDescriptors.laplacianCoordinates.end(), Eigen::Vector3d(0, 0, 0));
+
+	//concurrency::parallel_for_each(mesh->getVertices().begin(), mesh->getVertices().end(), [&](Vertex& vertex)
+	for (Vertex& vertex : mesh->getVertices())
 	{
 		int i = vertex.ID;
-		vertexDescriptors[i]->laplacianCoordinate = _vectorE3GA(0.0, 0.0, 0.0);
 		for (Vertex::EdgeAroundIterator edgeAroundIter = vertex.iterator(); !edgeAroundIter.end(); edgeAroundIter++)
 		{
 			int j = edgeAroundIter.edge_out()->pair->vertex->ID;
 			double wij = (*A)(i, j);
-			rotor &Ri = vertexDescriptors[i]->M;
-			rotor &Rj = vertexDescriptors[j]->M;
-			vectorE3GA V = _vectorE3GA(vertexDescriptors[j]->position) - _vectorE3GA(vertexDescriptors[i]->position);
-			vectorE3GA Vp = _vectorE3GA(0.5 * wij * (Ri * V * (~Ri) + Rj * V * (~Rj)));
-			vertexDescriptors[i]->laplacianCoordinate += Vp;
+			Eigen::Quaterniond&Ri = vertexDescriptors.rotors[i];
+			Eigen::Quaterniond&Rj = vertexDescriptors.rotors[j];
+			Eigen::Vector3d V = mesh->vertexAt(j).p - mesh->vertexAt(i).p;
+			vertexDescriptors.laplacianCoordinates[i] += 0.5 * wij * (Ri._transformVector(V) + Rj._transformVector(V));;
 		}
-	//}
-	});
+	}
+	//});
 }
 
-double ComputeEnergy(Mesh *mesh, std::shared_ptr<SparseMatrix> A, vector<std::shared_ptr<VertexDescriptor>>& vertexDescriptors)
+double ComputeEnergy(Mesh *mesh, std::shared_ptr<SparseMatrix> A, VertexBuffer& vertexDescriptors)
 {
 	double arapEnergy = 0.0;
 	const double alpha = 0.08;
@@ -721,8 +727,8 @@ double ComputeEnergy(Mesh *mesh, std::shared_ptr<SparseMatrix> A, vector<std::sh
 		int i = vertex.ID;
 
 		Eigen::Vector3d& pi = vertex.p;
-		vectorE3GA &tpi = vertexDescriptors[i]->deformedPosition;
-		auto& Ri = vertexDescriptors[i]->M;
+		Eigen::Vector3d &tpi = vertexDescriptors.deformedPositions[i];
+		auto& Ri = vertexDescriptors.rotors[i];
 
 		int vertexDegree = 0;
 		for (Vertex::EdgeAroundIterator edgeAroundIter = vertex.iterator(); !edgeAroundIter.end(); edgeAroundIter++)
@@ -736,50 +742,20 @@ double ComputeEnergy(Mesh *mesh, std::shared_ptr<SparseMatrix> A, vector<std::sh
 		{
 			int j = edgeAroundIter.edge_out()->pair->vertex->ID;
 
-			vectorE3GA &tpj = vertexDescriptors[j]->deformedPosition;
+			Eigen::Vector3d &tpj = vertexDescriptors.deformedPositions[j];
 			Eigen::Vector3d &pj = mesh->vertexAt(j).p;
 
 			Eigen::Vector3d eij = (pj - pi);
 			auto q_ij = tpj - tpi;
-			auto p_ij = _vectorE3GA(eij.x(), eij.y(), eij.z());
-			auto& Rj = vertexDescriptors[j]->M;
+			auto p_ij = eij;
+			auto& Rj = vertexDescriptors.rotors[j];
 
-			arapEnergy += _double((*A)(i, j) * c3ga::norm_e(_vectorE3GA(Ri * p_ij * ~Ri) - q_ij));
-			arapEnergy += _double(invVertexDegree * c3ga::norm_e(_rotor(Rj - Ri)));
+			arapEnergy += (*A)(i, j) * (Ri._transformVector(p_ij) - q_ij).squaredNorm();
+			arapEnergy += invVertexDegree * (Rj.coeffs() - Ri.coeffs()).squaredNorm();
 		}
 	}//);
 
 	return arapEnergy;
-}
-
-vectorE3GA Color( double d )
-{
-	static vectorE3GA	c0 = _vectorE3GA( 1, 1, 1);
-	static vectorE3GA	c1 = _vectorE3GA( 1, 1, 0);
-	static vectorE3GA	c2 = _vectorE3GA( 0, 1, 0);
-	static vectorE3GA	c3 = _vectorE3GA( 0, 1, 1);
-	static vectorE3GA	c4 = _vectorE3GA( 0, 0, 1);
-
-	if( d < 0.25 )
-	{
-		double alpha = (d - 0.0) / (0.25-0.0);
-		return (1.0 - alpha) * c0 + alpha * c1;
-	}
-	else if( d < 0.5 )
-	{
-		double alpha = (d - 0.25) / (0.5-0.25);
-		return (1.0 - alpha) * c1 + alpha * c2;
-	}
-	else if( d < 0.75 )
-	{
-		double alpha = (d - 0.5) / (0.75-0.5);
-		return (1.0 - alpha) * c2 + alpha * c3;
-	}
-	else
-	{
-		double alpha = (d - 0.75) / (1.0-0.75);
-		return (1.0 - alpha) * c3 + alpha * c4;
-	}
 }
 
 void display()
@@ -974,100 +950,40 @@ void display()
 	glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
 	glEnable( GL_COLOR_MATERIAL );
 	if (GLpick::g_pickActive) glLoadName((GLuint)10);
-	for (Face& face : mesh.getFaces())
+
+	glColor4d(1, 1, 1, alpha);
+	glEnableClientState(GL_NORMAL_ARRAY);
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glVertexPointer(3, GL_DOUBLE, 0, &vertexDescriptors.deformedPositions[0]);
+	glNormalPointer(GL_DOUBLE, 0, &vertexDescriptors.normals[0]);
+	// draw the model
+	glDrawElements(GL_TRIANGLES, trianglesHi.get_size(), GL_UNSIGNED_INT, &trianglesHi.faces[0]);
+	// deactivate vertex arrays after drawing
+	glDisableClientState(GL_VERTEX_ARRAY);
+	glDisableClientState(GL_NORMAL_ARRAY);
+
+	if (g_showWires)
 	{
-		int	v1 = face.edge->vertex->ID;
-		int	v2 = face.edge->next->vertex->ID;
-		int	v3 = face.edge->next->next->vertex->ID;
-		vectorE3GA& n1 = vertexDescriptors[v1]->normal;
-		vectorE3GA& n2 = vertexDescriptors[v2]->normal;
-		vectorE3GA& n3 = vertexDescriptors[v3]->normal;
-
-		vectorE3GA c0 = Color(0);
-		vectorE3GA c1 = Color(0);
-		vectorE3GA c2 = Color(0);
-
-		glBegin(GL_TRIANGLES);
-		glNormal3d(n1.e1(), n1.e2(), n1.e3());
-		glColor4d(c0.e1(), c0.e2(), c0.e3(), alpha);
-		glVertex3d(vertexDescriptors[v1]->deformedPosition.e1(), vertexDescriptors[v1]->deformedPosition.e2(), vertexDescriptors[v1]->deformedPosition.e3());
-		glNormal3d(n2.e1(), n2.e2(), n2.e3());
-		glColor4d(c1.e1(), c1.e2(), c1.e3(), alpha);
-		glVertex3d(vertexDescriptors[v2]->deformedPosition.e1(), vertexDescriptors[v2]->deformedPosition.e2(), vertexDescriptors[v2]->deformedPosition.e3());
-		glNormal3d(n3.e1(), n3.e2(), n3.e3());
-		glColor4d(c2.e1(), c2.e2(), c2.e3(), alpha);
-		glVertex3d(vertexDescriptors[v3]->deformedPosition.e1(), vertexDescriptors[v3]->deformedPosition.e2(), vertexDescriptors[v3]->deformedPosition.e3());
-		glEnd();
+		if (!GLpick::g_pickActive)
+		{
+			//Mesh-Edges Rendering (superimposed to faces)
+			glPolygonMode(GL_FRONT_AND_BACK, GL_LINE /*GL_LINE GL_FILL GL_POINT*/);
+			glColor4d(.5, .5, .5, alpha);
+			glDisable(GL_LIGHTING);
+			glEnableClientState(GL_VERTEX_ARRAY);
+			glVertexPointer(3, GL_DOUBLE, 0, &vertexDescriptors.deformedPositions[0]);
+			// draw the model
+			glDrawElements(GL_TRIANGLES, trianglesHi.get_size(), GL_UNSIGNED_INT, &trianglesHi.faces[0]);
+			// deactivate vertex arrays after drawing
+			glDisableClientState(GL_VERTEX_ARRAY);
+			glEnable(GL_LIGHTING);
+		}
 	}
 
 	//for (map<int, int>::iterator iter = mapping.begin(); iter != mapping.end(); iter++){
 	//	DrawPoint(c3gaPoint(vertexDescriptors[iter->second]->deformedPosition));
 	//}
 
-	//for( Mesh::FaceIterator fIter = meshLow.faceIterator() ; !fIter.end() ; fIter++ )
-	//{
-	//	Face		*face = fIter.face();
-	//	int	v1 = face->edge->vertex->ID;
-	//	int	v2 = face->edge->next->vertex->ID;
-	//	int	v3 = face->edge->next->next->vertex->ID;
-	//	vectorE3GA& n1 = vertexDescriptorsLow[v1]->normal;
-	//	vectorE3GA& n2 = vertexDescriptorsLow[v2]->normal;
-	//	vectorE3GA& n3 = vertexDescriptorsLow[v3]->normal;
-
-	//	vectorE3GA c0 = Color(0);
-	//	vectorE3GA c1 = Color(0);
-	//	vectorE3GA c2 = Color(0);
-
-	//	glBegin (GL_TRIANGLES);
-	//		glNormal3d( n1.e1(), n1.e2(), n1.e3() );
-	//		glColor4d( c0.e1(), c0.e2(), c0.e3(), alpha );
-	//		glVertex3d(vertexDescriptorsLow[v1]->deformedPosition.e1(), vertexDescriptorsLow[v1]->deformedPosition.e2(), vertexDescriptorsLow[v1]->deformedPosition.e3());
-	//		glNormal3d( n2.e1(), n2.e2(), n2.e3() );
-	//		glColor4d( c1.e1(), c1.e2(), c1.e3(), alpha );
-	//		glVertex3d(vertexDescriptorsLow[v2]->deformedPosition.e1(), vertexDescriptorsLow[v2]->deformedPosition.e2(), vertexDescriptorsLow[v2]->deformedPosition.e3());
-	//		glNormal3d( n3.e1(), n3.e2(), n3.e3() );
-	//		glColor4d( c2.e1(), c2.e2(), c2.e3(), alpha );
-	//		glVertex3d(vertexDescriptorsLow[v3]->deformedPosition.e1(), vertexDescriptorsLow[v3]->deformedPosition.e2(), vertexDescriptorsLow[v3]->deformedPosition.e3());
-	//	glEnd();
-	//}
-
-	if(g_showWires)
-	{
-		if (!GLpick::g_pickActive)
-		{
-			//Mesh-Edges Rendering (superimposed to faces)
-			glPolygonMode( GL_FRONT_AND_BACK, GL_LINE /*GL_LINE GL_FILL GL_POINT*/);
-			glColor4d( .5, .5, .5, alpha );
-			glDisable( GL_LIGHTING );
-			for (Face& face : mesh.getFaces())
-			{
-				int	v1 = face.edge->vertex->ID;
-				int	v2 = face.edge->next->vertex->ID;
-				int	v3 = face.edge->next->next->vertex->ID;
-
-				glBegin(GL_TRIANGLES);
-					glVertex3d(vertexDescriptors[v1]->deformedPosition.e1(), vertexDescriptors[v1]->deformedPosition.e2(), vertexDescriptors[v1]->deformedPosition.e3());
-					glVertex3d(vertexDescriptors[v2]->deformedPosition.e1(), vertexDescriptors[v2]->deformedPosition.e2(), vertexDescriptors[v2]->deformedPosition.e3());
-					glVertex3d(vertexDescriptors[v3]->deformedPosition.e1(), vertexDescriptors[v3]->deformedPosition.e2(), vertexDescriptors[v3]->deformedPosition.e3());
-				glEnd();
-			}
-
-			//for( Mesh::FaceIterator fIter = meshLow.faceIterator() ; !fIter.end() ; fIter++ )
-			//{
-			//	Face		*face = fIter.face();
-			//	int	v1 = face->edge->vertex->ID;
-			//	int	v2 = face->edge->next->vertex->ID;
-			//	int	v3 = face->edge->next->next->vertex->ID;
-
-			//	glBegin (GL_TRIANGLES);
-			//		glVertex3d(vertexDescriptorsLow[v1]->deformedPosition.e1(), vertexDescriptorsLow[v1]->deformedPosition.e2(), vertexDescriptorsLow[v1]->deformedPosition.e3());
-			//		glVertex3d(vertexDescriptorsLow[v2]->deformedPosition.e1(), vertexDescriptorsLow[v2]->deformedPosition.e2(), vertexDescriptorsLow[v2]->deformedPosition.e3());
-			//		glVertex3d(vertexDescriptorsLow[v3]->deformedPosition.e1(), vertexDescriptorsLow[v3]->deformedPosition.e2(), vertexDescriptorsLow[v3]->deformedPosition.e3());
-			//	glEnd();
-			//}
-			glEnable( GL_LIGHTING );
-		}
-	}
 	glDisable( GL_COLOR_MATERIAL );
 	glDisable(GL_POLYGON_OFFSET_FILL);
 
@@ -1084,8 +1000,8 @@ void display()
 		for( int k = 0 ; k < handles.size() ; ++k)
 		{
 			if (GLpick::g_pickActive) glLoadName((GLuint)k);
-			TRversor R = handles[k]->GetTRVersor();
-			DrawTransparentDualSphere( _dualSphere( R * handles[k]->dS * inverse(R) ), turcoise );
+			TRversor R = handles[k].GetTRVersor();
+			DrawTransparentDualSphere( _dualSphere( R * handles[k].dS * inverse(R) ), turcoise );
 		}		
 	}
 
@@ -1171,8 +1087,8 @@ void MouseMotion(int x, int y)
 			rotor R1 =  _rotor( exp(-g_camera.rotateVel * (motion ^ e3) ) );
 			if(g_dragObject < handles.size())
 			{
-				TRversor R = handles[g_dragObject]->R;
-				handles[g_dragObject]->R = normalize(_TRversor( R1 * R  ) );
+				rotor R = handles[g_dragObject].R;
+				handles[g_dragObject].R = normalize(_TRversor( R1 * R  ) );
 			}
 		}
 
@@ -1181,8 +1097,8 @@ void MouseMotion(int x, int y)
 			normalizedTranslator T1 = _normalizedTranslator(inverse(g_modelRotor) * exp( _freeVector(-g_camera.translateVel*motion*ni) ) * g_modelRotor);
 			if(g_dragObject < handles.size())
 			{
-				TRversor T = handles[g_dragObject]->T;
-				handles[g_dragObject]->T = normalize(_TRversor( T1 * T ));
+				translator T = handles[g_dragObject].T;
+				handles[g_dragObject].T = normalize(_TRversor( T1 * T ));
 			}
 		}
 
@@ -1209,7 +1125,7 @@ void SpecialFunc(int key, int x, int y)
 			{
 				if(g_rotateKeyRotors)
 				{
-					handles[g_dragObject]->dS = ChangeDualSphereRadiusSize(handles[g_dragObject]->dS, 0.025);
+					handles[g_dragObject].dS = ChangeDualSphereRadiusSize(handles[g_dragObject].dS, 0.025);
 
 					// redraw viewport
 					glutPostRedisplay();
@@ -1220,7 +1136,7 @@ void SpecialFunc(int key, int x, int y)
 			{
 				if(g_rotateKeyRotors)
 				{
-					handles[g_dragObject]->dS = ChangeDualSphereRadiusSize(handles[g_dragObject]->dS, -0.025);
+					handles[g_dragObject].dS = ChangeDualSphereRadiusSize(handles[g_dragObject].dS, -0.025);
 
 					// redraw viewport
 					glutPostRedisplay();
@@ -1241,8 +1157,8 @@ void KeyboardUpFunc(unsigned char key, int x, int y)
 		g_convergence = !g_convergence;
 		vectorE3GA motion = _vectorE3GA(-70.0, -60.0, 0);
 		normalizedTranslator T1 = _normalizedTranslator(inverse(g_modelRotor) * exp(_freeVector(-g_camera.translateVel*motion*ni)) * g_modelRotor);
-		TRversor T = handles[0]->T;
-		handles[0]->T = normalize(_TRversor(T1 * T));
+		translator T = handles[0].T;
+		handles[0].T = normalize(_TRversor(T1 * T));
 
 		glutPostRedisplay();
 	}
@@ -1312,8 +1228,8 @@ void Idle()
 		}
 
 		normalizedTranslator T1 = _normalizedTranslator(inverse(g_modelRotor) * exp(_freeVector(-g_camera.translateVel*motion*ni)) * g_modelRotor);
-		TRversor T = handles[0]->T;
-		handles[0]->T = normalize(_TRversor(T1 * T));
+		translator T = handles[0].T;
+		handles[0].T = normalize(_TRversor(T1 * T));
 
 		if (!benchs.IsStarted())
 		{
