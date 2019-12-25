@@ -184,23 +184,12 @@
     <ClInclude Include="HalfEdge\Face.h" />
     <ClInclude Include="HalfEdge\Mesh.h" />
     <ClInclude Include="HalfEdge\util.h" />
-    <ClInclude Include="HalfEdge\Vector3.h" />
     <ClInclude Include="HalfEdge\Vertex.h" />
-    <ClInclude Include="ICP.h" />
     <ClInclude Include="Laplacian.h" />
-    <ClInclude Include="LengthCorrector.h" />
-    <ClInclude Include="Matrix3x3.h" />
-    <ClInclude Include="MatrixNxM.h" />
     <ClInclude Include="primitivedraw.h" />
-    <ClInclude Include="PriorityQueue.h" />
-    <ClInclude Include="stdafx.h" />
-    <ClInclude Include="svd.h" />
-    <ClInclude Include="targetver.h" />
-    <ClInclude Include="TMatrix.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Flatten.cpp" />
-    <ClCompile Include="gahelper.cpp" />
     <ClCompile Include="GA\c2ga.cpp" />
     <ClCompile Include="GA\c2gatoc3ga.cpp" />
     <ClCompile Include="GA\c2ga_draw.cpp" />
@@ -228,11 +217,8 @@
     <ClCompile Include="GA\mv_analyze_h3ga.cpp" />
     <ClCompile Include="GA\timing.cpp" />
     <ClCompile Include="HalfEdge\Mesh.cpp" />
-    <ClCompile Include="ICP.cpp" />
     <ClCompile Include="Laplacian.cpp" />
     <ClCompile Include="primitivedraw.cpp" />
-    <ClCompile Include="stdafx.cpp" />
-    <ClCompile Include="svd.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="ReadMe.txt" />

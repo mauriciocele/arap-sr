@@ -21,7 +21,6 @@
 #include "primitivedraw.h"
 #include "gahelper.h"
 #include "laplacian.h"
-#include "LengthCorrector.h"
 
 #include <memory>
 
@@ -31,13 +30,6 @@
 #include "numerics.h"
 #include "HalfEdge/Mesh.h"
 
-#include "PriorityQueue.h"
-
-#include <geometry.H>
-#include "MatrixNxM.h"
-#include "Matrix3x3.h"
-#include "TMatrix.h"
-#include "ICP.h"
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
