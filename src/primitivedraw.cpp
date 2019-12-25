@@ -1,12 +1,18 @@
 #include "primitivedraw.h"
+#include <algorithm>
 
-#include "stdafx.h"
 #ifdef WIN32
-#define NOMINMAX 
+#define NOMINMAX
 #include <windows.h>
 #endif
-#include <GL/gl.h>
-#include <GL/glut.h>
+
+#if defined (__APPLE__) || defined (OSX)
+	#include <OpenGL/gl.h>
+	#include <GLUT/glut.h>
+#else
+	#include <GL/gl.h>
+	#include <GL/glut.h>
+#endif
 
 GLUquadric* quadratic = NULL;
 
@@ -100,7 +106,7 @@ void DrawArc(const dualCircle& circle, const normalizedPoint& a, const normalize
 	vecA = vecA * (1.0/_double(norm_e(vecA)));
 	vecB = vecB * (1.0/_double(norm_e(vecB)));
 
-	int size = 50; MIN( abs(radius), 50);
+	int size = 50; std::min( abs(radius), 50.0f);
 
 	vectorE3GA vecXi = vecA;
 	for( int i = 1 ; i <= size; ++i)

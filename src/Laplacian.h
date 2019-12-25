@@ -2,8 +2,9 @@
 #define __LAPLACIAN__H__
 
 #include <memory>
-#include <numerics.h>
-#include "HalfEdge\Mesh.h"
+#include <cfloat>
+#include "numerics.h"
+#include "HalfEdge/Mesh.h"
 
 const int Uniform = 0;
 const int LaplaceBeltrami = 1;

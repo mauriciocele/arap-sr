@@ -18,45 +18,26 @@ public:
    Edge * edge;
 
    // geometry data
-   Vector3 p;
-   Vector3 n;
-   Vector3 uv;
-
-   // Cone angle data (multiple of pi is stored)
-   double min_cone_angle;
-   double max_cone_angle;
-   bool constrained;
-   double cone_angle;
-
-   double radius;
-
-   double weight;
+   Eigen::Vector3d p;
+   Eigen::Vector3d n;
+   Eigen::Vector3d uv;
 
    // distinct id
    int ID;
-   int patchID;
 
    // to check various iterations
    bool check;
 
-   Vertex (const Vector3 & _pos = Vector3(0,0,0)): 
+   Vertex (const Eigen::Vector3d & _pos = Eigen::Vector3d(0,0,0)): 
    edge(NULL), p(_pos), uv(0,0,0)
    {
-      cone_angle = min_cone_angle = max_cone_angle = 2;
-      constrained = false;
-	  radius = 0.0;
-	  weight = 0.0;
-      patchID = 0;
    }
 
    // Assignment (copy only geometrical information)
    void assignData(const Vertex& rhs){
       if (this != &rhs) {
-	 p = rhs.p;
-	 uv = rhs.uv;
-	 cone_angle = rhs.cone_angle;
-	 min_cone_angle = rhs.min_cone_angle;
-	 max_cone_angle = rhs.max_cone_angle;
+         p = rhs.p;
+         uv = rhs.uv;
       }
    }
 
@@ -73,16 +54,16 @@ public:
 
    public:
       EdgeAroundIterator(Edge * e) {
-	 endI = NULL;
-	 run = e;
+         endI = NULL;
+         run = e;
       }
       EdgeAroundIterator& operator++( void ){
-	 if (!endI) endI = run;
-	 run = run->pair->next;
-	 return *this;
+         if (!endI) endI = run;
+         run = run->pair->next;
+         return *this;
       }
       EdgeAroundIterator operator++( int ){
-	 EdgeAroundIterator r = *this; ++*this; return r;
+      	 EdgeAroundIterator r = *this; ++*this; return r;
       }
 
       Edge * edge_out( void ) const { return run; }
@@ -101,7 +82,7 @@ public:
       Vertex::EdgeAroundIterator iter = iterator();
       int res = 0;
       for (; !iter.end(); iter++)
-	 res++;
+	      res++;
       return res;
    }
 };

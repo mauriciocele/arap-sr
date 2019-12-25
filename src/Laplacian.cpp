@@ -3,20 +3,18 @@
 using namespace std;
 using namespace numerics;
 
-#define MAX(x, y)	(((x) > (y)) ? (x) : (y))
-
-double cotangent(const Vector3& a, const Vector3& b, const Vector3& c)
+double cotangent(const Eigen::Vector3d& a, const Eigen::Vector3d& b, const Eigen::Vector3d& c)
 {
 	//Vector3 ba = (a - b).norm();
 	//Vector3 bc = (c - b).norm();
 	//return  1.0 / tan( arc_cosine( ba.dot(bc) ) );
 
-	Vector3 ba = a - b;
-	Vector3 bc = c - b;
-	return  (ba.dot(bc))/(ba.crossProduct(bc)).abs();
+	Eigen::Vector3d ba = a - b;
+	Eigen::Vector3d bc = c - b;
+	return  (ba.dot(bc))/(ba.cross(bc)).norm();
 }
 
-double tanThetaOverTwo(const Vector3& a, const Vector3& b, const Vector3& c)
+double tanThetaOverTwo(const Eigen::Vector3d& a, const Eigen::Vector3d& b, const Eigen::Vector3d& c)
 {
 	//Vector3 ba = (b - a).norm();
 	//Vector3 bc = (c - a).norm();
@@ -27,19 +25,19 @@ double tanThetaOverTwo(const Vector3& a, const Vector3& b, const Vector3& c)
 	// Use fact that tan(alpha/2) = (1-cos(alpha)) / sin(alpha).
 	// and use scalar and dot products to get cos(alpha) and sin(alpha).
 	//  M.F. Apr. 2002.
-	Vector3 bb = b - a;
-	Vector3 cc = c - a;
+	Eigen::Vector3d bb = b - a;
+	Eigen::Vector3d cc = c - a;
 
-	double cp = (bb.crossProduct(cc)).abs();
+	double cp = (bb.cross(cc)).norm();
 		// length of cross product of bb and cc
 	double dp = bb.dot(cc); // scalar product of bb and cc
-	double bc = bb.abs() * cc.abs();
+	double bc = bb.norm() * cc.norm();
 	return (bc - dp) / cp;
 }
 
-double faceArea(const Vector3& a, const Vector3& b, const Vector3& c)
+double faceArea(const Eigen::Vector3d& a, const Eigen::Vector3d& b, const Eigen::Vector3d& c)
 {
-    return 0.5 * ((b-a).crossProduct(c-a)).abs();
+    return 0.5 * ((b-a).cross(c-a)).norm();
 }
 
 Vertex* GetThirdVertexOnFace( Face *f, Vertex *v1, Vertex *v2)
@@ -75,7 +73,7 @@ double CalcCotangentWeights(Edge* edge)
 		cotBeta = cotangent(vi->p, vk->p, vj->p);
 	}
 
-	return MAX(0.0, (cotAlpha + cotBeta) / 2.0);
+	return std::max(0.0, (cotAlpha + cotBeta) / 2.0);
 }
 
 double CalcMeanValueWeights(Edge* edge)
@@ -99,22 +97,22 @@ double CalcMeanValueWeights(Edge* edge)
 		tanBeta = tanThetaOverTwo(vi->p, vk->p, vj->p);
 	}
 
-	return MAX(0.0, (tanAlpha + tanBeta) / (vi->p - vj->p).abs() );
+	return std::max(0.0, (tanAlpha + tanBeta) / (vi->p - vj->p).norm());
 }
 
 std::shared_ptr<SparseMatrix> CreateLaplacianMatrix(Mesh *mesh, int type)
 {
 	std::shared_ptr<SparseMatrix> L(new SparseMatrix(mesh->numVertices()));
 
-	for( Mesh::EdgeIterator eIter = mesh->edgeIterator() ; !eIter.end() ; eIter++ )
+	for( Edge* edge : mesh->getEdges())
 	{
-		int i = eIter.edge()->vertex->ID;
-		int j = eIter.edge()->pair->vertex->ID;
+		int i = edge->vertex->ID;
+		int j = edge->pair->vertex->ID;
 		double wij;
 		if(type == LaplaceBeltrami)
-			wij = CalcCotangentWeights(eIter.edge());
+			wij = CalcCotangentWeights(edge);
 		else if( type == MeanValue )
-			wij = CalcMeanValueWeights(eIter.edge());
+			wij = CalcMeanValueWeights(edge);
 		else
 			wij = 1.0; //uniform
 
@@ -123,12 +121,12 @@ std::shared_ptr<SparseMatrix> CreateLaplacianMatrix(Mesh *mesh, int type)
 	}
 
 	vector<double> areas;
-	for( Mesh::VertexIterator vIter = mesh->vertexIterator() ; !vIter.end() ; vIter++ )
+	for(Vertex& vertex : mesh->getVertices())
 	{
-		int i = vIter.vertex()->ID;
+		int i = vertex.ID;
 		double w = 0.0;
 		double area = 0.0;
-		for(Vertex::EdgeAroundIterator edgeAroundIter = vIter.vertex()->iterator() ; !edgeAroundIter.end() ; edgeAroundIter++)
+		for(Vertex::EdgeAroundIterator edgeAroundIter = vertex.iterator() ; !edgeAroundIter.end() ; edgeAroundIter++)
 		{
 			int j = edgeAroundIter.edge_out()->pair->vertex->ID;
 			w += (*L)(i, j);

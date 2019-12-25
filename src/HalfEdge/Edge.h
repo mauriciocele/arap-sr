@@ -6,7 +6,8 @@
 
 #ifndef EDGE_CM
 #define EDGE_CM
-#include "Vector3.h"
+#include <Eigen/Core>
+#include <Eigen/Dense>
 
 class Vertex;
 class Face;
@@ -42,24 +43,14 @@ public:
    /** Check for various iterations*/
    bool check;
 
-   double length;
-   double phiAngle;
-
-   double weight;
-
    Edge(void) : next(NULL), pair(NULL), vertex(NULL), face(NULL)
    {
-	   length = 0.0;
-	   phiAngle = 0.0;
-	   weight = 0.0;
 	   ID = -1;
    }
 
    // Assignment (copy only geometrical information)
    void assignData(const Edge& rhs){
       if (this != &rhs) {
-		  length = rhs.length;
-		  phiAngle = rhs.phiAngle;
       }
    }
 

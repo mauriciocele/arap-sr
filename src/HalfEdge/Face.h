@@ -8,7 +8,8 @@
 #include <iostream>
 #include "Edge.h"
 #include "Vertex.h"
-#include "Vector3.h"
+#include <Eigen/Core>
+#include <Eigen/Dense>
 
 /** Face for the mesh datastructure.
 
@@ -25,14 +26,12 @@ public:
 
    // distinct id
    int ID;
-   int patchID;
 
    // to check various iterations
    bool check;
 
    Face(void): edge(NULL), ID(-1) 
    { 
-      patchID = 0;
    }
 
    /** The iterator that visits edges, vertices, or faces around the current face in order. */
@@ -44,23 +43,23 @@ public:
    public:
 
       EdgeAroundIterator(Edge * e) {
-	 endI = NULL;
-	 run = e;
-	 _e = e;
+         endI = NULL;
+         run = e;
+         _e = e;
       }
 
       void reset() {
-	 endI = NULL;
-	 run = _e;
+         endI = NULL;
+         run = _e;
       }
 
       EdgeAroundIterator& operator++( void ){
-	 if (!endI) endI = run;
-	 run = run->next;
-	 return *this;
+         if (!endI) endI = run;
+         run = run->next;
+         return *this;
       }
       EdgeAroundIterator operator++( int ){
-	 EdgeAroundIterator r = *this; ++*this; return r;
+      	 EdgeAroundIterator r = *this; ++*this; return r;
       }
 
       Edge * edge( void ) const { return run; }
