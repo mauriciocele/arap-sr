@@ -20,7 +20,7 @@
 
 #include "primitivedraw.h"
 #include "gahelper.h"
-#include "laplacian.h"
+#include "Laplacian.h"
 
 #include <memory>
 
@@ -35,7 +35,7 @@
 #include <Eigen/Sparse>
 #include <Eigen/Geometry>
 
-#include <ppl.h>
+// #include <ppl.h>
 
 #include "Benchs.h"
 
